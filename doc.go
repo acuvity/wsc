@@ -11,4 +11,4 @@
 
 // Package wsc provides an idiomatic way to deal with
 // websockets using channels.
-package wsc // import "go.aporeto.io/wsc"
+package wsc // import "go.acuvity.ai/wsc"

@@ -1,4 +1,4 @@
-module go.aporeto.io/wsc
+module go.acuvity.ai/wsc
 
 go 1.18
 
