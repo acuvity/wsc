@@ -9,6 +9,7 @@ lint:
 	golangci-lint run \
 		--disable-all \
 		--exclude-use-default=false \
+		--exclude=dot-imports \
 		--exclude=package-comments \
 		--enable=errcheck \
 		--enable=goimports \
