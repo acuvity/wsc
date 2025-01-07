@@ -112,7 +112,7 @@ func Accept(ctx context.Context, conn WSConnection, config Config) (Websocket, e
 		config:      config,
 	}
 
-	s.conn.SetCloseHandler(func(code int, text string) error {
+	s.conn.SetCloseHandler(func(_ int, _ string) error {
 		s.cancel()
 		return nil
 	})

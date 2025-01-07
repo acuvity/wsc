@@ -53,7 +53,7 @@ func TestWSC_ReadWrite(t *testing.T) {
 		defer cancel()
 
 		var upgrader = websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: func(_ *http.Request) bool { return true },
 		}
 
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -131,7 +131,7 @@ func TestWSC_ReadFull(t *testing.T) {
 		defer cancel()
 
 		var upgrader = websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: func(_ *http.Request) bool { return true },
 		}
 
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -192,7 +192,7 @@ func TestWSC_WriteFull(t *testing.T) {
 		defer cancel()
 
 		var upgrader = websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: func(_ *http.Request) bool { return true },
 		}
 
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -252,7 +252,7 @@ func TestWSC_ConnectToServerWithHTTPError(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "nope man", http.StatusForbidden)
 		}))
 		defer ts.Close()
@@ -313,7 +313,7 @@ func TestWSC_GentleServerDisconnection(t *testing.T) {
 		defer cancel()
 
 		var upgrader = websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: func(_ *http.Request) bool { return true },
 		}
 
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -364,7 +364,7 @@ func TestWSC_BrutalServerDisconnection(t *testing.T) {
 		defer cancel()
 
 		var upgrader = websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: func(_ *http.Request) bool { return true },
 		}
 
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -409,7 +409,7 @@ func TestWSC_GentleClientDisconnection(t *testing.T) {
 		defer cancel()
 
 		var upgrader = websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: func(_ *http.Request) bool { return true },
 		}
 
 		rcvmsg := make(chan []byte)
@@ -477,7 +477,7 @@ func TestWSC_BrutalClientDisconnection(t *testing.T) {
 		defer cancel()
 
 		var upgrader = websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: func(_ *http.Request) bool { return true },
 		}
 
 		rcvmsg := make(chan []byte)
@@ -544,7 +544,7 @@ func TestWSC_ServerMissingPong(t *testing.T) {
 		defer cancel()
 
 		var upgrader = websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: func(_ *http.Request) bool { return true },
 		}
 
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -605,7 +605,7 @@ func TestWSC_ClientMissingPong(t *testing.T) {
 		defer cancel()
 
 		var upgrader = websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: func(_ *http.Request) bool { return true },
 		}
 
 		rcvmsg := make(chan []byte)
