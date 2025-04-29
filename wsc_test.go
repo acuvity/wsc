@@ -349,7 +349,7 @@ func TestWSC_GentleServerDisconnection(t *testing.T) {
 
 				Convey("Then err should be nil", func() {
 					So(err, ShouldNotBeNil)
-					So(err.Error(), ShouldEqual, "websocket: close 1001 (going away)")
+					So(err.Error(), ShouldEqual, "unable to read message: websocket: close 1001 (going away)")
 				})
 			})
 		})
@@ -394,7 +394,7 @@ func TestWSC_BrutalServerDisconnection(t *testing.T) {
 
 				Convey("Then err should be nil", func() {
 					So(err, ShouldNotBeNil)
-					So(err.Error(), ShouldEqual, "websocket: close 1006 (abnormal closure): unexpected EOF")
+					So(err.Error(), ShouldEqual, "unable to read message: websocket: close 1006 (abnormal closure): unexpected EOF")
 				})
 			})
 		})
@@ -458,7 +458,7 @@ func TestWSC_GentleClientDisconnection(t *testing.T) {
 
 				Convey("Then the err received by the client not be nil", func() {
 					So(err, ShouldNotBeNil)
-					So(err.Error(), ShouldEqual, "websocket: close 1007 (invalid payload data)")
+					So(err.Error(), ShouldEqual, "unable to read message: websocket: close 1007 (invalid payload data)")
 				})
 
 				Convey("Then no msg should be received by the client", func() {
@@ -525,7 +525,7 @@ func TestWSC_BrutalClientDisconnection(t *testing.T) {
 
 				Convey("Then the err received by the server not be nil", func() {
 					So(err, ShouldNotBeNil)
-					So(err.Error(), ShouldEqual, "websocket: close 1006 (abnormal closure): unexpected EOF")
+					So(err.Error(), ShouldEqual, "unable to read message: websocket: close 1006 (abnormal closure): unexpected EOF")
 				})
 
 				Convey("Then no msg should be received by the server", func() {
@@ -725,7 +725,7 @@ func TestWSC_writePumpWithWriteErrorForPing(t *testing.T) {
 		Convey("When I read the errors", func() {
 
 			Convey("Then the error should be correct", func() {
-				So(<-errCh, ShouldEqual, conn.writeMessageError)
+				So((<-errCh).Error(), ShouldEqual, "unable to write ping message: "+conn.writeMessageError.Error())
 			})
 		})
 	})
@@ -767,7 +767,7 @@ func TestWSC_writePumpWithWriteErrorForWrite(t *testing.T) {
 		Convey("When I read the errors", func() {
 
 			Convey("Then the error should be correct", func() {
-				So(<-errCh, ShouldEqual, conn.writeMessageError)
+				So((<-errCh).Error(), ShouldEqual, "unable to write message: "+conn.writeMessageError.Error())
 			})
 		})
 	})
