@@ -176,7 +176,7 @@ func (s *ws) readPump() {
 
 	for {
 		if msgType, msg, err = s.conn.ReadMessage(); err != nil {
-			s.done(err)
+			s.done(fmt.Errorf("unable to read message: %w", err))
 			return
 		}
 
@@ -207,17 +207,23 @@ func (s *ws) writePump(ctx context.Context) {
 
 		case message := <-s.writeChan:
 
-			_ = s.conn.SetWriteDeadline(time.Now().Add(s.config.WriteWait)) // nolint: errcheck
+			if err = s.conn.SetWriteDeadline(time.Now().Add(s.config.WriteWait)); err != nil {
+				s.done(fmt.Errorf("unable to set message write deadline: %w", err))
+				return
+			}
 			if err = s.conn.WriteMessage(websocket.TextMessage, message); err != nil {
-				s.done(err)
+				s.done(fmt.Errorf("unable to write message: %w", err))
 				return
 			}
 
 		case <-ticker.C:
 
-			_ = s.conn.SetWriteDeadline(time.Now().Add(s.config.WriteWait)) // nolint: errcheck
+			if err = s.conn.SetWriteDeadline(time.Now().Add(s.config.WriteWait)); err != nil {
+				s.done(fmt.Errorf("unable to set ping write deadline: %w", err))
+				return
+			}
 			if err = s.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				s.done(err)
+				s.done(fmt.Errorf("unable to write ping message: %w", err))
 				return
 			}
 
