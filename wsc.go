@@ -99,7 +99,7 @@ func Accept(ctx context.Context, conn WSConnection, config Config) (Websocket, e
 		return nil, err
 	}
 
-	subCtx, cancel := context.WithCancel(ctx)
+	subCtx, cancel := context.WithCancel(context.Background())
 
 	s := &ws{
 		conn:        conn,
