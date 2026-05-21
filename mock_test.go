@@ -16,6 +16,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/gorilla/websocket"
 	. "github.com/smartystreets/goconvey/convey"
 )
 
@@ -27,23 +28,23 @@ func TestWSC_Mock(t *testing.T) {
 
 		Convey("When I set NextRead then read", func() {
 
-			m.NextRead([]byte("hello"))
+			m.NextRead(Frame{D: []byte("hello"), T: websocket.TextMessage})
 
 			out := <-m.Read()
 
 			Convey("Then out should be correct", func() {
-				So(string(out), ShouldEqual, "hello")
+				So(string(out.D), ShouldEqual, "hello")
 			})
 		})
 
 		Convey("When I write someting then get LastWrite", func() {
 
-			m.Write([]byte("hello"))
+			m.Write(TextFrame([]byte("hello")))
 
 			out := <-m.LastWrite()
 
 			Convey("Then out should be correct", func() {
-				So(string(out), ShouldEqual, "hello")
+				So(string(out.D), ShouldEqual, "hello")
 			})
 		})
 

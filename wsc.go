@@ -44,8 +44,8 @@ type WSConnection interface {
 
 type ws struct {
 	conn        WSConnection
-	readChan    chan []byte
-	writeChan   chan []byte
+	readChan    chan Frame
+	writeChan   chan Frame
 	doneChan    chan error
 	errChan     chan error
 	cancel      context.CancelFunc
@@ -103,8 +103,8 @@ func Accept(ctx context.Context, conn WSConnection, config Config) (Websocket, e
 
 	s := &ws{
 		conn:        conn,
-		readChan:    make(chan []byte, config.ReadChanSize),
-		writeChan:   make(chan []byte, config.WriteChanSize),
+		readChan:    make(chan Frame, config.ReadChanSize),
+		writeChan:   make(chan Frame, config.WriteChanSize),
 		doneChan:    make(chan error, 2),
 		errChan:     make(chan error, 10),
 		closeCodeCh: make(chan int, 1),
@@ -128,17 +128,17 @@ func Accept(ctx context.Context, conn WSConnection, config Config) (Websocket, e
 }
 
 // Write is part of the the Websocket interface implementation.
-func (s *ws) Write(data []byte) {
+func (s *ws) Write(f Frame) {
 
 	select {
-	case s.writeChan <- data:
+	case s.writeChan <- f:
 	default:
 		s.error(ErrWriteMessageDiscarded)
 	}
 }
 
 // Read is part of the the Websocket interface implementation.
-func (s *ws) Read() chan []byte {
+func (s *ws) Read() chan Frame {
 
 	return s.readChan
 }
@@ -171,11 +171,11 @@ func (s *ws) Close(code int) {
 func (s *ws) readPump() {
 
 	var err error
-	var msg []byte
+	var data []byte
 	var msgType int
 
 	for {
-		if msgType, msg, err = s.conn.ReadMessage(); err != nil {
+		if msgType, data, err = s.conn.ReadMessage(); err != nil {
 			s.done(fmt.Errorf("unable to read message: %w", err))
 			return
 		}
@@ -184,7 +184,7 @@ func (s *ws) readPump() {
 
 		case websocket.TextMessage, websocket.BinaryMessage:
 			select {
-			case s.readChan <- msg:
+			case s.readChan <- Frame{D: data, T: msgType}:
 			default:
 				s.error(ErrReadMessageDiscarded)
 			}
@@ -205,13 +205,13 @@ func (s *ws) writePump(ctx context.Context) {
 	for {
 		select {
 
-		case message := <-s.writeChan:
+		case frame := <-s.writeChan:
 
 			if err = s.conn.SetWriteDeadline(time.Now().Add(s.config.WriteWait)); err != nil {
 				s.done(fmt.Errorf("unable to set message write deadline: %w", err))
 				return
 			}
-			if err = s.conn.WriteMessage(websocket.TextMessage, message); err != nil {
+			if err = s.conn.WriteMessage(frame.T, frame.D); err != nil {
 				s.done(fmt.Errorf("unable to write message: %w", err))
 				return
 			}

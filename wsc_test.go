@@ -93,11 +93,12 @@ func TestWSC_ReadWrite(t *testing.T) {
 
 			Convey("When I listen for a message", func() {
 
-				s.Write([]byte("hello"))
+				s.Write(TextFrame([]byte("hello")))
 				msg := <-s.Read()
 
 				Convey("Then msg should be correct", func() {
-					So(string(msg), ShouldEqual, "hello")
+					So(string(msg.D), ShouldEqual, "hello")
+					So(msg.T, ShouldEqual, websocket.TextMessage)
 				})
 
 				Convey("When I close the connection", func() {
@@ -146,8 +147,8 @@ func TestWSC_ReadFull(t *testing.T) {
 				panic(err)
 			}
 
-			h.Write([]byte{})
-			h.Write([]byte{})
+			h.Write(EmptyTextFrame())
+			h.Write(EmptyTextFrame())
 
 			<-ctx.Done()
 		}))
@@ -165,8 +166,8 @@ func TestWSC_ReadFull(t *testing.T) {
 
 			Convey("When I send for a message", func() {
 
-				s.Write([]byte("hello"))
-				<-time.After(300 * time.Millisecond)
+				s.Write(TextFrame([]byte("hello")))
+				<-time.After(500 * time.Millisecond)
 
 				var err error
 				select {
@@ -223,11 +224,11 @@ func TestWSC_WriteFull(t *testing.T) {
 
 			Convey("When I send for a message", func() {
 
-				s.Write([]byte{})
-				s.Write([]byte{})
-				s.Write([]byte{})
-				s.Write([]byte{})
-				s.Write([]byte{})
+				s.Write(Frame{})
+				s.Write(Frame{})
+				s.Write(Frame{})
+				s.Write(Frame{})
+				s.Write(Frame{})
 
 				var err error
 				select {
@@ -412,7 +413,7 @@ func TestWSC_GentleClientDisconnection(t *testing.T) {
 			CheckOrigin: func(_ *http.Request) bool { return true },
 		}
 
-		rcvmsg := make(chan []byte)
+		rcvmsg := make(chan Frame)
 		rcvdone := make(chan error)
 
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -448,7 +449,7 @@ func TestWSC_GentleClientDisconnection(t *testing.T) {
 				ws.Close(websocket.CloseInvalidFramePayloadData)
 
 				var err error
-				var msg []byte
+				var msg Frame
 				select {
 				case err = <-rcvdone:
 				case msg = <-rcvmsg:
@@ -462,7 +463,7 @@ func TestWSC_GentleClientDisconnection(t *testing.T) {
 				})
 
 				Convey("Then no msg should be received by the client", func() {
-					So(msg, ShouldBeNil)
+					So(msg, ShouldBeZeroValue)
 				})
 			})
 		})
@@ -480,7 +481,7 @@ func TestWSC_BrutalClientDisconnection(t *testing.T) {
 			CheckOrigin: func(_ *http.Request) bool { return true },
 		}
 
-		rcvmsg := make(chan []byte)
+		rcvmsg := make(chan Frame)
 		rcvdone := make(chan error)
 
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -515,7 +516,7 @@ func TestWSC_BrutalClientDisconnection(t *testing.T) {
 				w.(*ws).conn.Close() // nolint: errcheck
 
 				var err error
-				var msg []byte
+				var msg Frame
 				select {
 				case err = <-rcvdone:
 				case msg = <-rcvmsg:
@@ -529,7 +530,7 @@ func TestWSC_BrutalClientDisconnection(t *testing.T) {
 				})
 
 				Convey("Then no msg should be received by the server", func() {
-					So(msg, ShouldBeNil)
+					So(msg, ShouldBeZeroValue)
 				})
 			})
 		})
@@ -576,7 +577,7 @@ func TestWSC_ServerMissingPong(t *testing.T) {
 				<-time.After(300 * time.Millisecond)
 
 				var err error
-				var msg []byte
+				var msg Frame
 				select {
 				case err = <-ws.Done():
 				case msg = <-ws.Read():
@@ -590,7 +591,7 @@ func TestWSC_ServerMissingPong(t *testing.T) {
 				})
 
 				Convey("Then no msg should be received by the client", func() {
-					So(msg, ShouldBeNil)
+					So(msg, ShouldBeZeroValue)
 				})
 			})
 		})
@@ -608,7 +609,7 @@ func TestWSC_ClientMissingPong(t *testing.T) {
 			CheckOrigin: func(_ *http.Request) bool { return true },
 		}
 
-		rcvmsg := make(chan []byte)
+		rcvmsg := make(chan Frame)
 		rcvdone := make(chan error)
 
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -647,7 +648,7 @@ func TestWSC_ClientMissingPong(t *testing.T) {
 				<-time.After(300 * time.Millisecond)
 
 				var err error
-				var msg []byte
+				var msg Frame
 				select {
 				case err = <-rcvdone:
 				case msg = <-rcvmsg:
@@ -661,7 +662,7 @@ func TestWSC_ClientMissingPong(t *testing.T) {
 				})
 
 				Convey("Then no msg should be received by the server", func() {
-					So(msg, ShouldBeNil)
+					So(msg, ShouldBeZeroValue)
 				})
 			})
 		})
@@ -742,7 +743,7 @@ func TestWSC_writePumpWithWriteErrorForWrite(t *testing.T) {
 		s := &ws{
 			conn:      conn,
 			doneChan:  make(chan error, 1),
-			writeChan: make(chan []byte, 2),
+			writeChan: make(chan Frame, 2),
 			config: Config{
 				PingPeriod: 10 * time.Millisecond,
 			},
@@ -763,7 +764,7 @@ func TestWSC_writePumpWithWriteErrorForWrite(t *testing.T) {
 
 		go s.writePump(ctx)
 
-		s.writeChan <- []byte{}
+		s.writeChan <- Frame{}
 		Convey("When I read the errors", func() {
 
 			Convey("Then the error should be correct", func() {

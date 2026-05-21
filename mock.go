@@ -19,16 +19,16 @@ import (
 // A MockWebsocket is a utility to write unit
 // tests on websockets.
 type MockWebsocket interface {
-	NextRead(data []byte)
-	LastWrite() chan []byte
+	NextRead(data Frame)
+	LastWrite() chan Frame
 	NextDone(err error)
 
 	Websocket
 }
 
 type mockWebsocket struct {
-	readChan  chan []byte
-	writeChan chan []byte
+	readChan  chan Frame
+	writeChan chan Frame
 	doneChan  chan error
 	errChan   chan error
 	cancel    context.CancelFunc
@@ -41,19 +41,19 @@ func NewMockWebsocket(ctx context.Context) MockWebsocket {
 	_, cancel := context.WithCancel(ctx)
 
 	return &mockWebsocket{
-		readChan:  make(chan []byte, 64),
-		writeChan: make(chan []byte, 64),
+		readChan:  make(chan Frame, 64),
+		writeChan: make(chan Frame, 64),
 		doneChan:  make(chan error, 64),
 		errChan:   make(chan error, 1),
 		cancel:    cancel,
 	}
 }
 
-func (s *mockWebsocket) Write(data []byte)      { s.writeChan <- data }
-func (s *mockWebsocket) Read() chan []byte      { return s.readChan }
-func (s *mockWebsocket) Done() chan error       { return s.doneChan }
-func (s *mockWebsocket) Close(code int)         { s.doneChan <- fmt.Errorf("%d", code) }
-func (s *mockWebsocket) NextRead(data []byte)   { s.readChan <- data }
-func (s *mockWebsocket) LastWrite() chan []byte { return s.writeChan }
-func (s *mockWebsocket) NextDone(err error)     { s.doneChan <- err }
-func (s *mockWebsocket) Error() chan error      { return s.errChan }
+func (s *mockWebsocket) Write(f Frame)         { s.writeChan <- f }
+func (s *mockWebsocket) Read() chan Frame      { return s.readChan }
+func (s *mockWebsocket) Done() chan error      { return s.doneChan }
+func (s *mockWebsocket) Close(code int)        { s.doneChan <- fmt.Errorf("%d", code) }
+func (s *mockWebsocket) NextRead(data Frame)   { s.readChan <- data }
+func (s *mockWebsocket) LastWrite() chan Frame { return s.writeChan }
+func (s *mockWebsocket) NextDone(err error)    { s.doneChan <- err }
+func (s *mockWebsocket) Error() chan error     { return s.errChan }

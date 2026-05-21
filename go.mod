@@ -1,4 +1,4 @@
-module go.acuvity.ai/wsc
+module go.acuvity.ai/wsc/v2
 
 go 1.18
 
