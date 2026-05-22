@@ -7,21 +7,19 @@ default: lint test
 
 lint:
 	golangci-lint run \
-		--disable-all \
-		--exclude-use-default=false \
-		--exclude=dot-imports \
-		--exclude=package-comments \
+		--timeout=5m \
+		--disable=govet  \
 		--enable=errcheck \
-		--enable=goimports \
 		--enable=ineffassign \
-		--enable=revive \
 		--enable=unused \
-		--enable=staticcheck \
 		--enable=unconvert \
 		--enable=misspell \
 		--enable=prealloc \
 		--enable=nakedret \
 		--enable=unparam \
+		--enable=nilerr \
+		--enable=bodyclose \
+		--enable=errorlint \
 		./...
 
 test:

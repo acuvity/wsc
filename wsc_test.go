@@ -63,7 +63,7 @@ func TestWSC_ReadWrite(t *testing.T) {
 				panic(err)
 			}
 
-			h, err := Accept(ctx, s, Config{})
+			h, err := Accept(s, Config{})
 			if err != nil {
 				panic(err)
 			}
@@ -81,6 +81,7 @@ func TestWSC_ReadWrite(t *testing.T) {
 				strings.Replace(ts.URL, "http://", "ws://", 1),
 				Config{},
 			)
+			defer func() { _ = resp.Body.Close() }()
 
 			Convey("Then err should be nil", func() {
 				So(err, ShouldBeNil)
@@ -142,68 +143,7 @@ func TestWSC_ReadFull(t *testing.T) {
 				panic(err)
 			}
 
-			h, err := Accept(ctx, s, Config{})
-			if err != nil {
-				panic(err)
-			}
-
-			h.Write(EmptyTextFrame())
-			h.Write(EmptyTextFrame())
-
-			<-ctx.Done()
-		}))
-		defer ts.Close()
-
-		Convey("When I connect to the webserver", func() {
-
-			s, _, _ := Connect(
-				ctx,
-				strings.Replace(ts.URL, "http://", "ws://", 1),
-				Config{
-					ReadChanSize: 1,
-				},
-			)
-
-			Convey("When I send for a message", func() {
-
-				s.Write(TextFrame([]byte("hello")))
-				<-time.After(500 * time.Millisecond)
-
-				var err error
-				select {
-				case err = <-s.Error():
-				case <-time.After(time.Second):
-					panic("did not receive error in time")
-				}
-
-				Convey("Then err should be correct", func() {
-					So(err, ShouldNotBeNil)
-					So(err, ShouldEqual, ErrReadMessageDiscarded)
-				})
-			})
-		})
-	})
-}
-
-func TestWSC_WriteFull(t *testing.T) {
-
-	Convey("Given I have a webserver that works", t, func() {
-
-		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-		defer cancel()
-
-		var upgrader = websocket.Upgrader{
-			CheckOrigin: func(_ *http.Request) bool { return true },
-		}
-
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-			s, err := upgrader.Upgrade(w, r, nil)
-			if err != nil {
-				panic(err)
-			}
-
-			_, err = Accept(ctx, s, Config{})
+			_, err = Accept(s, Config{})
 			if err != nil {
 				panic(err)
 			}
@@ -214,13 +154,14 @@ func TestWSC_WriteFull(t *testing.T) {
 
 		Convey("When I connect to the webserver", func() {
 
-			s, _, _ := Connect(
+			s, resp, _ := Connect(
 				ctx,
 				strings.Replace(ts.URL, "http://", "ws://", 1),
 				Config{
 					WriteChanSize: 1,
 				},
 			)
+			defer func() { _ = resp.Body.Close() }()
 
 			Convey("When I send for a message", func() {
 
@@ -261,6 +202,7 @@ func TestWSC_ConnectToServerWithHTTPError(t *testing.T) {
 		Convey("When I connect to the webserver", func() {
 
 			ws, resp, err := Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
+			defer func() { _ = resp.Body.Close() }()
 
 			Convey("Then ws should be nil", func() {
 				So(ws, ShouldBeNil)
@@ -289,6 +231,11 @@ func TestWSC_CannotConnect(t *testing.T) {
 		Convey("When I connect to the non existing server", func() {
 
 			ws, resp, err := Connect(ctx, "ws://127.0.0.1:7745", Config{})
+			defer func() {
+				if resp != nil {
+					_ = resp.Body.Close()
+				}
+			}()
 
 			Convey("Then ws should be nil", func() {
 				So(ws, ShouldBeNil)
@@ -324,7 +271,7 @@ func TestWSC_GentleServerDisconnection(t *testing.T) {
 				panic(err)
 			}
 
-			h, err := Accept(ctx, ws, Config{})
+			h, err := Accept(ws, Config{})
 			if err != nil {
 				panic(err)
 			}
@@ -335,7 +282,8 @@ func TestWSC_GentleServerDisconnection(t *testing.T) {
 
 		Convey("When I connect to the webserver", func() {
 
-			ws, _, _ := Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
+			ws, resp, _ := Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
+			defer func() { _ = resp.Body.Close() }()
 
 			Convey("When I wait for a message", func() {
 
@@ -380,7 +328,8 @@ func TestWSC_BrutalServerDisconnection(t *testing.T) {
 
 		Convey("When I connect to the webserver", func() {
 
-			ws, _, _ := Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
+			ws, resp, _ := Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
+			defer func() { _ = resp.Body.Close() }()
 
 			Convey("When I wait for a message", func() {
 
@@ -423,7 +372,7 @@ func TestWSC_GentleClientDisconnection(t *testing.T) {
 				panic(err)
 			}
 
-			h, err := Accept(ctx, ws, Config{})
+			h, err := Accept(ws, Config{})
 			if err != nil {
 				panic(err)
 			}
@@ -442,7 +391,8 @@ func TestWSC_GentleClientDisconnection(t *testing.T) {
 
 		Convey("When I connect to the webserver", func() {
 
-			ws, _, _ := Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
+			ws, resp, _ := Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
+			defer func() { _ = resp.Body.Close() }()
 
 			Convey("When I gracefully stop the connection", func() {
 
@@ -491,7 +441,7 @@ func TestWSC_BrutalClientDisconnection(t *testing.T) {
 				panic(err)
 			}
 
-			h, err := Accept(ctx, ws, Config{})
+			h, err := Accept(ws, Config{})
 			if err != nil {
 				panic(err)
 			}
@@ -509,7 +459,8 @@ func TestWSC_BrutalClientDisconnection(t *testing.T) {
 
 		Convey("When I connect to the webserver", func() {
 
-			w, _, _ := Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
+			w, resp, _ := Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
+			defer func() { _ = resp.Body.Close() }()
 
 			Convey("When I gracefully stop the connection", func() {
 
@@ -555,7 +506,7 @@ func TestWSC_ServerMissingPong(t *testing.T) {
 				panic(err)
 			}
 
-			_, err = Accept(ctx, ws, Config{})
+			_, err = Accept(ws, Config{})
 			if err != nil {
 				panic(err)
 			}
@@ -566,11 +517,13 @@ func TestWSC_ServerMissingPong(t *testing.T) {
 
 		Convey("When I connect to the webserver", func() {
 
-			ws, _, _ := Connect(
+			ws, resp, _ := Connect(
 				ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{
 					PongWait:   1 * time.Nanosecond, // we wait for nothing
 					PingPeriod: 50 * time.Millisecond,
-				})
+				},
+			)
+			defer func() { _ = resp.Body.Close() }()
 
 			Convey("When I wait for a message", func() {
 
@@ -619,7 +572,7 @@ func TestWSC_ClientMissingPong(t *testing.T) {
 				panic(err)
 			}
 
-			h, err := Accept(ctx, ws, Config{
+			h, err := Accept(ws, Config{
 				PongWait:   1 * time.Millisecond,
 				PingPeriod: 50 * time.Millisecond,
 			})
@@ -641,7 +594,8 @@ func TestWSC_ClientMissingPong(t *testing.T) {
 
 		Convey("When I connect to the webserver", func() {
 
-			_, _, _ = Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
+			_, resp, _ := Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
+			defer func() { _ = resp.Body.Close() }()
 
 			Convey("When I wait for a message", func() {
 
@@ -679,7 +633,7 @@ func TestWWS_AcceptWithFailedReadDeadline(t *testing.T) {
 
 		Convey("When I call Accept", func() {
 
-			ws, err := Accept(context.Background(), conn, Config{})
+			ws, err := Accept(conn, Config{})
 
 			Convey("Then err should be correct", func() {
 				So(err, ShouldEqual, conn.readDeadlineError)
@@ -782,7 +736,7 @@ func TestWSC_PongHandlerWithError(t *testing.T) {
 
 		Convey("When I call Accept", func() {
 
-			_, _ = Accept(context.Background(), conn, Config{})
+			_, _ = Accept(conn, Config{})
 
 			err := conn.pongHandler("hello")
 

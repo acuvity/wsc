@@ -71,13 +71,13 @@ func Connect(ctx context.Context, url string, config Config) (Websocket, *http.R
 		return nil, resp, err
 	}
 
-	s, err := Accept(ctx, conn, config)
+	s, err := Accept(conn, config)
 
 	return s, resp, err
 }
 
 // Accept handles an already connect *websocket.Conn and returns a Websocket.
-func Accept(ctx context.Context, conn WSConnection, config Config) (Websocket, error) {
+func Accept(conn WSConnection, config Config) (Websocket, error) {
 
 	if config.PongWait == 0 {
 		config.PongWait = 30 * time.Second
