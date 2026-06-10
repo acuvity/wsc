@@ -122,7 +122,7 @@ func Accept(conn WSConnection, config Config) (Websocket, error) {
 		return s.conn.SetReadDeadline(time.Now().Add(s.config.PongWait))
 	})
 
-	go s.readPump()
+	go s.readPump(subCtx)
 	go s.writePump(subCtx)
 
 	return s, nil
@@ -174,7 +174,7 @@ func (s *ws) Close(code int) {
 	s.cancel()
 }
 
-func (s *ws) readPump() {
+func (s *ws) readPump(ctx context.Context) {
 
 	var err error
 	var data []byte
@@ -189,6 +189,15 @@ func (s *ws) readPump() {
 		switch msgType {
 
 		case websocket.TextMessage, websocket.BinaryMessage:
+
+			if s.config.Blocking {
+				select {
+				case s.readChan <- Frame{D: data, T: msgType}:
+				case <-ctx.Done():
+				}
+				continue
+			}
+
 			select {
 			case s.readChan <- Frame{D: data, T: msgType}:
 			default:
