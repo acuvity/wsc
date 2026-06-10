@@ -13,10 +13,10 @@ package wsc
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"log"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -49,8 +49,13 @@ type ws struct {
 	doneChan    chan error
 	errChan     chan error
 	cancel      context.CancelFunc
+	ctx         context.Context
 	closeCodeCh chan int
 	config      Config
+	closing     atomic.Bool
+
+	readPumpClosed  bool
+	writePumpClosed bool
 }
 
 // Connect connects to the url and returns a Websocket.
@@ -100,16 +105,17 @@ func Accept(conn WSConnection, config Config) (Websocket, error) {
 		return nil, err
 	}
 
-	subCtx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 
 	s := &ws{
 		conn:        conn,
 		readChan:    make(chan Frame, config.ReadChanSize),
 		writeChan:   make(chan Frame, config.WriteChanSize),
-		doneChan:    make(chan error, 2),
+		doneChan:    make(chan error, 1),
 		errChan:     make(chan error, 10),
 		closeCodeCh: make(chan int, 1),
 		cancel:      cancel,
+		ctx:         ctx,
 		config:      config,
 	}
 
@@ -122,8 +128,8 @@ func Accept(conn WSConnection, config Config) (Websocket, error) {
 		return s.conn.SetReadDeadline(time.Now().Add(s.config.PongWait))
 	})
 
-	go s.readPump()
-	go s.writePump(subCtx)
+	go s.readPump(ctx)
+	go s.writePump(ctx)
 
 	return s, nil
 }
@@ -132,7 +138,10 @@ func Accept(conn WSConnection, config Config) (Websocket, error) {
 func (s *ws) Write(f Frame) {
 
 	if s.config.Blocking {
-		s.writeChan <- f
+		select {
+		case s.writeChan <- f:
+		case <-s.ctx.Done():
+		}
 		return
 	}
 
@@ -164,6 +173,9 @@ func (s *ws) Done() chan error {
 // Close is part of the the Websocket interface implementation.
 func (s *ws) Close(code int) {
 
+	s.closing.Store(true)
+	s.cancel()
+
 	if code != 0 {
 		select {
 		case s.closeCodeCh <- code:
@@ -171,24 +183,44 @@ func (s *ws) Close(code int) {
 		}
 	}
 
-	s.cancel()
 }
 
-func (s *ws) readPump() {
+func (s *ws) readPump(ctx context.Context) {
+
+	// this is test code. we can keep track
+	// we correctlty exit pumps
+	defer func() { s.readPumpClosed = true }()
+
+	defer s.cancel()
 
 	var err error
 	var data []byte
 	var msgType int
 
 	for {
+
 		if msgType, data, err = s.conn.ReadMessage(); err != nil {
-			s.done(fmt.Errorf("unable to read message: %w", err))
+			var rerr error
+			if !s.closing.Load() {
+				rerr = fmt.Errorf("unable to read message: %w", err)
+			}
+			s.done(rerr)
 			return
 		}
 
 		switch msgType {
 
 		case websocket.TextMessage, websocket.BinaryMessage:
+
+			if s.config.Blocking {
+				select {
+				case s.readChan <- Frame{D: data, T: msgType}:
+				case <-ctx.Done():
+					return
+				}
+				continue
+			}
+
 			select {
 			case s.readChan <- Frame{D: data, T: msgType}:
 			default:
@@ -202,6 +234,12 @@ func (s *ws) readPump() {
 }
 
 func (s *ws) writePump(ctx context.Context) {
+
+	// this is test code. we can keep track
+	// we correctlty exit pumps
+	defer func() { s.writePumpClosed = true }()
+
+	defer s.cancel()
 
 	var err error
 
@@ -235,25 +273,23 @@ func (s *ws) writePump(ctx context.Context) {
 
 		case <-ctx.Done():
 
+			s.closing.Store(true)
+
 			code := websocket.CloseGoingAway
 			select {
 			case code = <-s.closeCodeCh:
 			default:
 			}
 
-			enc := make([]byte, 2)
-			binary.BigEndian.PutUint16(enc, uint16(code))
-
-			s.done(
-				s.conn.WriteControl(
-					websocket.CloseMessage,
-					enc,
-					time.Now().Add(1*time.Second),
-				),
+			_ = s.conn.WriteControl(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(code, ""),
+				time.Now().Add(1*time.Second),
 			)
 
 			_ = s.conn.Close()
 
+			s.done(nil)
 			return
 		}
 	}

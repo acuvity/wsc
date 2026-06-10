@@ -12,8 +12,8 @@
 package wsc
 
 import (
+	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -45,6 +45,78 @@ func (c *fakeWSConnection) WriteMessage(int, []byte) error            { return c
 func (c *fakeWSConnection) WriteControl(int, []byte, time.Time) error { return c.writeControlError }
 func (c *fakeWSConnection) Close() error                              { return c.closeError }
 
+func waitClose(s Websocket, code int) {
+
+	s.Close(code)
+
+	var cerr error
+
+	select {
+
+	case cerr = <-s.Done():
+
+	case <-time.After(10 * time.Second):
+		cerr = fmt.Errorf("did not close in time")
+	}
+
+	So(cerr, ShouldBeNil)
+
+	// give a bit of time for everything to settle down.
+	time.Sleep(300 * time.Millisecond)
+
+	So(s.(*ws).readPumpClosed, ShouldBeTrue)
+	So(s.(*ws).writePumpClosed, ShouldBeTrue)
+}
+
+func echoServer(ctx context.Context) *httptest.Server {
+
+	var upgrader = websocket.Upgrader{
+		CheckOrigin: func(_ *http.Request) bool { return true },
+	}
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		s, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			panic(err)
+		}
+
+		h, err := Accept(s, Config{})
+		if err != nil {
+			panic(err)
+		}
+
+		for {
+			select {
+			case d := <-h.Read():
+
+				if bytes.EqualFold(d.D, []byte("die")) {
+					return
+				}
+
+				if bytes.EqualFold(d.D, []byte("brutal-close")) {
+					s.Close()
+					return
+				}
+
+				if bytes.EqualFold(d.D, []byte("gentle-close")) {
+					h.Close(websocket.CloseGoingAway)
+					return
+				}
+
+				if bytes.EqualFold(d.D, []byte("delay")) {
+					time.Sleep(time.Second)
+				}
+
+				h.Write(d)
+
+			case <-ctx.Done():
+				return
+			}
+		}
+	}))
+}
+
 func TestWSC_ReadWrite(t *testing.T) {
 
 	Convey("Given I have a webserver that works", t, func() {
@@ -52,76 +124,77 @@ func TestWSC_ReadWrite(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 
-		var upgrader = websocket.Upgrader{
-			CheckOrigin: func(_ *http.Request) bool { return true },
-		}
-
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-			s, err := upgrader.Upgrade(w, r, nil)
-			if err != nil {
-				panic(err)
-			}
-
-			h, err := Accept(s, Config{})
-			if err != nil {
-				panic(err)
-			}
-
-			h.Write(<-h.Read())
-
-			<-ctx.Done()
-		}))
+		ts := echoServer(ctx)
 		defer ts.Close()
 
-		Convey("When I connect to the webserver", func() {
+		s, resp, err := Connect(
+			ctx,
+			strings.Replace(ts.URL, "http://", "ws://", 1),
+			Config{},
+		)
+		defer func() { _ = resp.Body.Close() }()
 
-			s, resp, err := Connect(
-				ctx,
-				strings.Replace(ts.URL, "http://", "ws://", 1),
-				Config{},
-			)
-			defer func() { _ = resp.Body.Close() }()
+		So(err, ShouldBeNil)
+		So(resp, ShouldNotBeNil)
+		So(resp.Status, ShouldEqual, "101 Switching Protocols")
 
-			Convey("Then err should be nil", func() {
-				So(err, ShouldBeNil)
-			})
+		s.Write(TextFrame([]byte("hello")))
+		msg := <-s.Read()
 
-			Convey("Then resp should be correct", func() {
-				So(resp, ShouldNotBeNil)
-				So(resp.Status, ShouldEqual, "101 Switching Protocols")
-			})
+		So(string(msg.D), ShouldEqual, "hello")
+		So(msg.T, ShouldEqual, websocket.TextMessage)
 
-			Convey("When I listen for a message", func() {
+		waitClose(s, 0)
+	})
+}
 
-				s.Write(TextFrame([]byte("hello")))
-				msg := <-s.Read()
+func TestWSC_ReadWriteBlocking(t *testing.T) {
 
-				Convey("Then msg should be correct", func() {
-					So(string(msg.D), ShouldEqual, "hello")
-					So(msg.T, ShouldEqual, websocket.TextMessage)
-				})
+	Convey("Given I have a webserver that works", t, func() {
 
-				Convey("When I close the connection", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		defer cancel()
 
-					doneErr := make(chan error)
-					go func() {
-						select {
-						case e := <-s.Done():
-							doneErr <- e
-						case <-ctx.Done():
-							doneErr <- errors.New("test: no response in time")
-						}
-					}()
+		ts := echoServer(ctx)
+		defer ts.Close()
 
-					s.Close(0)
+		s, resp, err := Connect(
+			ctx,
+			strings.Replace(ts.URL, "http://", "ws://", 1),
+			Config{
+				Blocking:      true,
+				ReadChanSize:  1,
+				WriteChanSize: 1,
+			},
+		)
+		defer func() { _ = resp.Body.Close() }()
 
-					Convey("Then doneErr should be nil", func() {
-						So(<-doneErr, ShouldBeNil)
-					})
-				})
-			})
-		})
+		So(err, ShouldBeNil)
+		So(resp, ShouldNotBeNil)
+		So(resp.Status, ShouldEqual, "101 Switching Protocols")
+
+		go func() {
+			s.Write(TextFrame([]byte("hello1")))
+			s.Write(TextFrame([]byte("hello2")))
+			s.Write(TextFrame([]byte("hello3")))
+		}()
+
+		// since this is blocking and the size of chan is 1,
+		// if it was non blocking, we would discard some messages.
+		msg1 := <-s.Read()
+		msg2 := <-s.Read()
+		msg3 := <-s.Read()
+
+		So(string(msg1.D), ShouldEqual, "hello1")
+		So(msg1.T, ShouldEqual, websocket.TextMessage)
+
+		So(string(msg2.D), ShouldEqual, "hello2")
+		So(msg2.T, ShouldEqual, websocket.TextMessage)
+
+		So(string(msg3.D), ShouldEqual, "hello3")
+		So(msg3.T, ShouldEqual, websocket.TextMessage)
+
+		waitClose(s, 0)
 	})
 }
 
@@ -132,24 +205,7 @@ func TestWSC_ReadFull(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 
-		var upgrader = websocket.Upgrader{
-			CheckOrigin: func(_ *http.Request) bool { return true },
-		}
-
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-			s, err := upgrader.Upgrade(w, r, nil)
-			if err != nil {
-				panic(err)
-			}
-
-			_, err = Accept(s, Config{})
-			if err != nil {
-				panic(err)
-			}
-
-			<-ctx.Done()
-		}))
+		ts := echoServer(ctx)
 		defer ts.Close()
 
 		Convey("When I connect to the webserver", func() {
@@ -163,26 +219,23 @@ func TestWSC_ReadFull(t *testing.T) {
 			)
 			defer func() { _ = resp.Body.Close() }()
 
-			Convey("When I send for a message", func() {
+			s.Write(TextFrame([]byte("hello")))
+			s.Write(TextFrame([]byte("hello")))
+			s.Write(TextFrame([]byte("hello")))
+			s.Write(TextFrame([]byte("hello")))
+			s.Write(TextFrame([]byte("hello")))
 
-				s.Write(Frame{})
-				s.Write(Frame{})
-				s.Write(Frame{})
-				s.Write(Frame{})
-				s.Write(Frame{})
+			var err error
+			select {
+			case err = <-s.Error():
+			case <-time.After(2 * time.Second):
+				panic("did not receive error in time")
+			}
 
-				var err error
-				select {
-				case err = <-s.Error():
-				case <-time.After(time.Second):
-					panic("did not receive error in time")
-				}
+			So(err, ShouldNotBeNil)
+			So(err, ShouldEqual, ErrWriteMessageDiscarded)
 
-				Convey("Then err should be correct", func() {
-					So(err, ShouldNotBeNil)
-					So(err, ShouldEqual, ErrWriteMessageDiscarded)
-				})
-			})
+			waitClose(s, 0)
 		})
 	})
 }
@@ -204,19 +257,11 @@ func TestWSC_ConnectToServerWithHTTPError(t *testing.T) {
 			ws, resp, err := Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
 			defer func() { _ = resp.Body.Close() }()
 
-			Convey("Then ws should be nil", func() {
-				So(ws, ShouldBeNil)
-			})
-
-			Convey("Then err should not be nil", func() {
-				So(err, ShouldNotBeNil)
-				So(err.Error(), ShouldEqual, "websocket: bad handshake")
-			})
-
-			Convey("Then resp should be correct", func() {
-				So(resp, ShouldNotBeNil)
-				So(resp.Status, ShouldEqual, "403 Forbidden")
-			})
+			So(ws, ShouldBeNil)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldEqual, "websocket: bad handshake")
+			So(resp, ShouldNotBeNil)
+			So(resp.Status, ShouldEqual, "403 Forbidden")
 		})
 	})
 }
@@ -237,18 +282,10 @@ func TestWSC_CannotConnect(t *testing.T) {
 				}
 			}()
 
-			Convey("Then ws should be nil", func() {
-				So(ws, ShouldBeNil)
-			})
-
-			Convey("Then err should not be nil", func() {
-				So(err, ShouldNotBeNil)
-				So(err.Error(), ShouldEndWith, "connection refused")
-			})
-
-			Convey("Then resp should be nil", func() {
-				So(resp, ShouldBeNil)
-			})
+			So(ws, ShouldBeNil)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldEndWith, "connection refused")
+			So(resp, ShouldBeNil)
 		})
 	})
 }
@@ -260,30 +297,16 @@ func TestWSC_GentleServerDisconnection(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 
-		var upgrader = websocket.Upgrader{
-			CheckOrigin: func(_ *http.Request) bool { return true },
-		}
-
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-			ws, err := upgrader.Upgrade(w, r, nil)
-			if err != nil {
-				panic(err)
-			}
-
-			h, err := Accept(ws, Config{})
-			if err != nil {
-				panic(err)
-			}
-
-			h.Close(0)
-		}))
+		ts := echoServer(ctx)
 		defer ts.Close()
 
 		Convey("When I connect to the webserver", func() {
 
 			ws, resp, _ := Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
 			defer func() { _ = resp.Body.Close() }()
+
+			// tell the echo server to close ws gently
+			ws.Write(TextFrame([]byte("gentle-close")))
 
 			Convey("When I wait for a message", func() {
 
@@ -296,10 +319,10 @@ func TestWSC_GentleServerDisconnection(t *testing.T) {
 					panic("test: no response in time")
 				}
 
-				Convey("Then err should be nil", func() {
-					So(err, ShouldNotBeNil)
-					So(err.Error(), ShouldEqual, "unable to read message: websocket: close 1001 (going away)")
-				})
+				So(err, ShouldNotBeNil)
+				So(err.Error(), ShouldEqual, "unable to read message: websocket: close 1001 (going away)")
+
+				waitClose(ws, 0)
 			})
 		})
 	})
@@ -312,24 +335,16 @@ func TestWSC_BrutalServerDisconnection(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 
-		var upgrader = websocket.Upgrader{
-			CheckOrigin: func(_ *http.Request) bool { return true },
-		}
-
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-			ws, err := upgrader.Upgrade(w, r, nil)
-			if err != nil {
-				panic(err)
-			}
-			ws.Close() // nolint: errcheck
-		}))
+		ts := echoServer(ctx)
 		defer ts.Close()
 
 		Convey("When I connect to the webserver", func() {
 
 			ws, resp, _ := Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
 			defer func() { _ = resp.Body.Close() }()
+
+			// tell the echo server to close ws brutally
+			ws.Write(TextFrame([]byte("brutal-close")))
 
 			Convey("When I wait for a message", func() {
 
@@ -342,10 +357,10 @@ func TestWSC_BrutalServerDisconnection(t *testing.T) {
 					panic("test: no response in time")
 				}
 
-				Convey("Then err should be nil", func() {
-					So(err, ShouldNotBeNil)
-					So(err.Error(), ShouldEqual, "unable to read message: websocket: close 1006 (abnormal closure): unexpected EOF")
-				})
+				So(err, ShouldNotBeNil)
+				So(err.Error(), ShouldEqual, "unable to read message: websocket: close 1006 (abnormal closure): unexpected EOF")
+
+				waitClose(ws, 0)
 			})
 		})
 	})
@@ -394,28 +409,22 @@ func TestWSC_GentleClientDisconnection(t *testing.T) {
 			ws, resp, _ := Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
 			defer func() { _ = resp.Body.Close() }()
 
-			Convey("When I gracefully stop the connection", func() {
+			ws.Close(websocket.CloseInvalidFramePayloadData)
 
-				ws.Close(websocket.CloseInvalidFramePayloadData)
+			var err error
+			var msg Frame
+			select {
+			case err = <-rcvdone:
+			case msg = <-rcvmsg:
+			case <-time.After(1 * time.Second):
+				panic("test: no response in time")
+			}
 
-				var err error
-				var msg Frame
-				select {
-				case err = <-rcvdone:
-				case msg = <-rcvmsg:
-				case <-time.After(1 * time.Second):
-					panic("test: no response in time")
-				}
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldEqual, "unable to read message: websocket: close 1007 (invalid payload data)")
+			So(msg, ShouldBeZeroValue)
 
-				Convey("Then the err received by the client not be nil", func() {
-					So(err, ShouldNotBeNil)
-					So(err.Error(), ShouldEqual, "unable to read message: websocket: close 1007 (invalid payload data)")
-				})
-
-				Convey("Then no msg should be received by the client", func() {
-					So(msg, ShouldBeZeroValue)
-				})
-			})
+			waitClose(ws, 0)
 		})
 	})
 }
@@ -462,28 +471,23 @@ func TestWSC_BrutalClientDisconnection(t *testing.T) {
 			w, resp, _ := Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
 			defer func() { _ = resp.Body.Close() }()
 
-			Convey("When I gracefully stop the connection", func() {
+			w.(*ws).conn.Close() // nolint: errcheck
 
-				w.(*ws).conn.Close() // nolint: errcheck
+			var err error
+			var msg Frame
+			select {
+			case err = <-rcvdone:
+			case msg = <-rcvmsg:
+			case <-ctx.Done():
+				panic("test: no response in time")
+			}
 
-				var err error
-				var msg Frame
-				select {
-				case err = <-rcvdone:
-				case msg = <-rcvmsg:
-				case <-ctx.Done():
-					panic("test: no response in time")
-				}
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldEqual, "unable to read message: websocket: close 1006 (abnormal closure): unexpected EOF")
+			So(msg, ShouldBeZeroValue)
 
-				Convey("Then the err received by the server not be nil", func() {
-					So(err, ShouldNotBeNil)
-					So(err.Error(), ShouldEqual, "unable to read message: websocket: close 1006 (abnormal closure): unexpected EOF")
-				})
-
-				Convey("Then no msg should be received by the server", func() {
-					So(msg, ShouldBeZeroValue)
-				})
-			})
+			So(w.(*ws).readPumpClosed, ShouldBeTrue)
+			So(w.(*ws).writePumpClosed, ShouldBeTrue)
 		})
 	})
 }
@@ -495,29 +499,12 @@ func TestWSC_ServerMissingPong(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 
-		var upgrader = websocket.Upgrader{
-			CheckOrigin: func(_ *http.Request) bool { return true },
-		}
-
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-			ws, err := upgrader.Upgrade(w, r, nil)
-			if err != nil {
-				panic(err)
-			}
-
-			_, err = Accept(ws, Config{})
-			if err != nil {
-				panic(err)
-			}
-
-			<-ctx.Done()
-		}))
+		ts := echoServer(ctx)
 		defer ts.Close()
 
 		Convey("When I connect to the webserver", func() {
 
-			ws, resp, _ := Connect(
+			s, resp, _ := Connect(
 				ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{
 					PongWait:   1 * time.Nanosecond, // we wait for nothing
 					PingPeriod: 50 * time.Millisecond,
@@ -532,20 +519,18 @@ func TestWSC_ServerMissingPong(t *testing.T) {
 				var err error
 				var msg Frame
 				select {
-				case err = <-ws.Done():
-				case msg = <-ws.Read():
+				case err = <-s.Done():
+				case msg = <-s.Read():
 				case <-ctx.Done():
 					panic("test: no response in time")
 				}
 
-				Convey("Then the err received by the client not be nil", func() {
-					So(err, ShouldNotBeNil)
-					So(err.Error(), ShouldEndWith, "i/o timeout")
-				})
+				So(err, ShouldNotBeNil)
+				So(err.Error(), ShouldEndWith, "i/o timeout")
+				So(msg, ShouldBeZeroValue)
 
-				Convey("Then no msg should be received by the client", func() {
-					So(msg, ShouldBeZeroValue)
-				})
+				So(s.(*ws).readPumpClosed, ShouldBeTrue)
+				So(s.(*ws).writePumpClosed, ShouldBeTrue)
 			})
 		})
 	})
@@ -594,7 +579,7 @@ func TestWSC_ClientMissingPong(t *testing.T) {
 
 		Convey("When I connect to the webserver", func() {
 
-			_, resp, _ := Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
+			s, resp, _ := Connect(ctx, strings.Replace(ts.URL, "http://", "ws://", 1), Config{})
 			defer func() { _ = resp.Body.Close() }()
 
 			Convey("When I wait for a message", func() {
@@ -610,14 +595,12 @@ func TestWSC_ClientMissingPong(t *testing.T) {
 					panic("test: no response in time")
 				}
 
-				Convey("Then the err received by the server not be nil", func() {
-					So(err, ShouldNotBeNil)
-					So(err.Error(), ShouldEndWith, "i/o timeout")
-				})
+				So(err, ShouldNotBeNil)
+				So(err.Error(), ShouldEndWith, "i/o timeout")
+				So(msg, ShouldBeZeroValue)
 
-				Convey("Then no msg should be received by the server", func() {
-					So(msg, ShouldBeZeroValue)
-				})
+				So(s.(*ws).readPumpClosed, ShouldBeTrue)
+				So(s.(*ws).writePumpClosed, ShouldBeTrue)
 			})
 		})
 	})
@@ -635,13 +618,8 @@ func TestWWS_AcceptWithFailedReadDeadline(t *testing.T) {
 
 			ws, err := Accept(conn, Config{})
 
-			Convey("Then err should be correct", func() {
-				So(err, ShouldEqual, conn.readDeadlineError)
-			})
-
-			Convey("Then ws should be nil", func() {
-				So(ws, ShouldBeNil)
-			})
+			So(err, ShouldEqual, conn.readDeadlineError)
+			So(ws, ShouldBeNil)
 		})
 	})
 }
@@ -654,9 +632,13 @@ func TestWSC_writePumpWithWriteErrorForPing(t *testing.T) {
 			writeMessageError: fmt.Errorf("failed"),
 		}
 
+		subctx, cancel := context.WithCancel(t.Context())
+
 		s := &ws{
 			conn:     conn,
 			doneChan: make(chan error, 1),
+			ctx:      subctx,
+			cancel:   cancel,
 			config: Config{
 				PingPeriod: 1 * time.Millisecond,
 			},
@@ -694,10 +676,14 @@ func TestWSC_writePumpWithWriteErrorForWrite(t *testing.T) {
 			writeMessageError: fmt.Errorf("failed"),
 		}
 
+		subctx, cancel := context.WithCancel(t.Context())
+
 		s := &ws{
 			conn:      conn,
 			doneChan:  make(chan error, 1),
 			writeChan: make(chan Frame, 2),
+			ctx:       subctx,
+			cancel:    cancel,
 			config: Config{
 				PingPeriod: 10 * time.Millisecond,
 			},
@@ -740,9 +726,7 @@ func TestWSC_PongHandlerWithError(t *testing.T) {
 
 			err := conn.pongHandler("hello")
 
-			Convey("Then err should be correct", func() {
-				So(err, ShouldBeNil)
-			})
+			So(err, ShouldBeNil)
 		})
 	})
 }
