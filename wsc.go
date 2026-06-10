@@ -64,6 +64,7 @@ func Connect(ctx context.Context, url string, config Config) (Websocket, *http.R
 		EnableCompression: config.EnableCompression,
 		NetDialContext:    config.NetDialContextFunc,
 		NetDialTLSContext: config.NetDialTLSContextFunc,
+		Subprotocols:      config.Subprotocols,
 	}
 
 	conn, resp, err := dialer.DialContext(ctx, url, config.Headers)
@@ -129,6 +130,11 @@ func Accept(conn WSConnection, config Config) (Websocket, error) {
 
 // Write is part of the the Websocket interface implementation.
 func (s *ws) Write(f Frame) {
+
+	if s.config.Blocking {
+		s.writeChan <- f
+		return
+	}
 
 	select {
 	case s.writeChan <- f:

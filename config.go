@@ -33,4 +33,6 @@ type Config struct {
 	WriteBufferSize       int
 	WriteChanSize         int
 	EnableCompression     bool
+	Blocking              bool
+	Subprotocols          []string
 }
