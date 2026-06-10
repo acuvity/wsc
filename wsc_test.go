@@ -45,7 +45,7 @@ func (c *fakeWSConnection) WriteMessage(int, []byte) error            { return c
 func (c *fakeWSConnection) WriteControl(int, []byte, time.Time) error { return c.writeControlError }
 func (c *fakeWSConnection) Close() error                              { return c.closeError }
 
-func waitClose(s Websocket, code int) {
+func waitClose(s Websocket, code int) { // nolint: unparam
 
 	s.Close(code)
 
@@ -95,7 +95,7 @@ func echoServer(ctx context.Context) *httptest.Server {
 				}
 
 				if bytes.EqualFold(d.D, []byte("brutal-close")) {
-					s.Close()
+					_ = s.Close()
 					return
 				}
 
