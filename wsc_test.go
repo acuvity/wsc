@@ -25,6 +25,10 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
+func init() {
+	testEnablePumpsTracking = true
+}
+
 type fakeWSConnection struct {
 	readDeadlineError  error
 	writeDeadlineError error
@@ -64,8 +68,8 @@ func waitClose(s Websocket, code int) { // nolint: unparam
 	// give a bit of time for everything to settle down.
 	time.Sleep(300 * time.Millisecond)
 
-	So(s.(*ws).readPumpClosed, ShouldBeTrue)
-	So(s.(*ws).writePumpClosed, ShouldBeTrue)
+	So(s.(*ws).readPumpClosed.Load(), ShouldBeTrue)
+	So(s.(*ws).writePumpClosed.Load(), ShouldBeTrue)
 }
 
 func echoServer(ctx context.Context) *httptest.Server {
@@ -486,8 +490,8 @@ func TestWSC_BrutalClientDisconnection(t *testing.T) {
 			So(err.Error(), ShouldEqual, "unable to read message: websocket: close 1006 (abnormal closure): unexpected EOF")
 			So(msg, ShouldBeZeroValue)
 
-			So(w.(*ws).readPumpClosed, ShouldBeTrue)
-			So(w.(*ws).writePumpClosed, ShouldBeTrue)
+			So(w.(*ws).readPumpClosed.Load(), ShouldBeTrue)
+			So(w.(*ws).writePumpClosed.Load(), ShouldBeTrue)
 		})
 	})
 }
@@ -529,8 +533,8 @@ func TestWSC_ServerMissingPong(t *testing.T) {
 				So(err.Error(), ShouldEndWith, "i/o timeout")
 				So(msg, ShouldBeZeroValue)
 
-				So(s.(*ws).readPumpClosed, ShouldBeTrue)
-				So(s.(*ws).writePumpClosed, ShouldBeTrue)
+				So(s.(*ws).readPumpClosed.Load(), ShouldBeTrue)
+				So(s.(*ws).writePumpClosed.Load(), ShouldBeTrue)
 			})
 		})
 	})
@@ -599,8 +603,8 @@ func TestWSC_ClientMissingPong(t *testing.T) {
 				So(err.Error(), ShouldEndWith, "i/o timeout")
 				So(msg, ShouldBeZeroValue)
 
-				So(s.(*ws).readPumpClosed, ShouldBeTrue)
-				So(s.(*ws).writePumpClosed, ShouldBeTrue)
+				So(s.(*ws).readPumpClosed.Load(), ShouldBeTrue)
+				So(s.(*ws).writePumpClosed.Load(), ShouldBeTrue)
 			})
 		})
 	})

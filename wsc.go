@@ -26,6 +26,9 @@ import (
 var (
 	ErrWriteMessageDiscarded = fmt.Errorf("write chan full: one or more messages has not been sent")
 	ErrReadMessageDiscarded  = fmt.Errorf("read chan full: one or more messages has not been received")
+
+	// this enable tracking pumps exiting for unit tests
+	testEnablePumpsTracking = false
 )
 
 // WSConnection is the interface that must be implemented
@@ -54,8 +57,8 @@ type ws struct {
 	config      Config
 	closing     atomic.Bool
 
-	readPumpClosed  bool
-	writePumpClosed bool
+	readPumpClosed  atomic.Bool
+	writePumpClosed atomic.Bool
 }
 
 // Connect connects to the url and returns a Websocket.
@@ -182,14 +185,15 @@ func (s *ws) Close(code int) {
 		default:
 		}
 	}
-
 }
 
 func (s *ws) readPump(ctx context.Context) {
 
 	// this is test code. we can keep track
 	// we correctlty exit pumps
-	defer func() { s.readPumpClosed = true }()
+	if testEnablePumpsTracking {
+		defer func() { s.readPumpClosed.Store(true) }()
+	}
 
 	defer s.cancel()
 
@@ -237,7 +241,9 @@ func (s *ws) writePump(ctx context.Context) {
 
 	// this is test code. we can keep track
 	// we correctlty exit pumps
-	defer func() { s.writePumpClosed = true }()
+	if testEnablePumpsTracking {
+		defer func() { s.writePumpClosed.Store(true) }()
+	}
 
 	defer s.cancel()
 
